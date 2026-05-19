@@ -19,6 +19,22 @@ A personal trading journal built with Flutter. The app helps traders log trades,
 - Light and dark themes
 - Responsive navigation for mobile, tablet, and desktop layouts
 
+## Screenshots
+
+### Dashboard
+![Dashboard](assets/images/dashboard.png)
+
+### PnL Calendar
+![PnL Calendar](assets/images/pnl_calendar1.png)
+![PnL Calendar](assets/images/pnl_calendar2.png)
+
+### Trade Journal
+![Journal](assets/images/journal.png)
+
+### Grok AI Assistant
+![Analyze journal with AI](assets/images/analyze_trade.png)
+
+
 ## Tech Stack
 
 | Area | Packages |
