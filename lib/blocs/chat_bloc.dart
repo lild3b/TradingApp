@@ -61,9 +61,8 @@ class ChatConversation extends Equatable {
                 id: m['id'] as String?,
                 content: m['content'] as String? ?? '',
                 isUser: m['isUser'] as bool? ?? false,
-                timestamp:
-                    DateTime.tryParse(m['timestamp'] as String? ?? '') ??
-                        DateTime.now(),
+                timestamp: DateTime.tryParse(m['timestamp'] as String? ?? '') ??
+                    DateTime.now(),
               ))
           .toList(),
     );
@@ -187,8 +186,9 @@ class ChatErrorState extends ChatState {
 }
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
-  ChatBloc({required AiTradingService aiService})
+  ChatBloc({required AiTradingService aiService, String? profileId})
       : _aiService = aiService,
+        _profileId = profileId,
         super(const ChatInitialState()) {
     on<InitializeChatEvent>(_onInitialize);
     on<NewChatConversationEvent>(_onNewConversation);
@@ -201,6 +201,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   final AiTradingService _aiService;
+  final String? _profileId;
   final List<ChatConversation> _conversations = [];
   String? _activeConversationId;
 
@@ -269,8 +270,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (active == null) return;
 
     _replaceActiveConversation(active.copyWith(
-      messages:
-          active.messages.where((m) => m.id != event.messageId).toList(),
+      messages: active.messages.where((m) => m.id != event.messageId).toList(),
       updatedAt: DateTime.now(),
     ));
     await _saveConversations();
@@ -329,7 +329,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(_loadingState());
 
     try {
-      final response = await _aiService.analyzeTradeJournal(event.journalContent);
+      final response =
+          await _aiService.analyzeTradeJournal(event.journalContent);
       _appendMessages([
         ChatMessage(
           content: response,
@@ -361,7 +362,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(_loadingState());
 
     try {
-      final response = await _aiService.analyzeTradeJournalFromFile(event.filePath);
+      final response =
+          await _aiService.analyzeTradeJournalFromFile(event.filePath);
       _appendMessages([
         ChatMessage(
           content: response,
@@ -423,7 +425,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _loadConversations() async {
     final stored = await SecureStorageService.instance.read(
-      SecureStorageService.chatConversationsKey,
+      SecureStorageService.chatConversationsKeyForProfile(_profileId),
     );
     _conversations.clear();
     if (stored == null || stored.trim().isEmpty) return;
@@ -443,7 +445,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _saveConversations() async {
     await SecureStorageService.instance.write(
-      SecureStorageService.chatConversationsKey,
+      SecureStorageService.chatConversationsKeyForProfile(_profileId),
       jsonEncode({
         'activeConversationId': _activeConversationId,
         'conversations': _conversations.map((c) => c.toJson()).toList(),

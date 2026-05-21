@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../blocs/chat_bloc.dart';
+import '../blocs/user_profile/user_profile_bloc.dart';
 import '../services/ai_trading_service.dart';
 import '../services/secure_storage_service.dart';
 
@@ -29,7 +30,18 @@ class _ChatModalState extends State<ChatModal> {
   void initState() {
     super.initState();
     _grokService = GrokTradingService();
-    _chatBloc = ChatBloc(aiService: _grokService);
+
+    String? profileId;
+    try {
+      final profileState = context.read<UserProfileBloc>().state;
+      if (profileState is ProfileSelected) {
+        profileId = profileState.selectedProfile.id;
+      }
+    } catch (_) {
+      profileId = null;
+    }
+
+    _chatBloc = ChatBloc(aiService: _grokService, profileId: profileId);
     _chatBloc.add(InitializeChatEvent());
     _loadSavedApiConfig();
   }
