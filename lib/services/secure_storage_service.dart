@@ -35,4 +35,11 @@ class SecureStorageService {
   static const String groqApiKeyKey = 'groq_api_key';
   static const String groqModelNameKey = 'groq_model_name';
   static const String chatConversationsKey = 'chat_conversations';
+
+  static String chatConversationsKeyForProfile(String? profileId) {
+    final trimmed = profileId?.trim();
+    return trimmed == null || trimmed.isEmpty
+        ? chatConversationsKey
+        : '${chatConversationsKey}_$trimmed';
+  }
 }
