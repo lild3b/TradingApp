@@ -1,11 +1,13 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:intl/intl.dart';
+import '../models/tag.dart';
 import '../models/trade.dart';
 import '../models/user_profile.dart';
 import '../repositories/trade_repository.dart';
 import '../repositories/user_profile_repository.dart';
 import '../services/file_service.dart';
+import 'backup_image_data.dart';
+import 'backup_file_reader.dart';
 
 class BackupRepository {
   BackupRepository({
@@ -24,12 +26,15 @@ class BackupRepository {
     final profile = await _profileRepo.getProfileById(userId);
     if (profile == null) throw Exception('Profile not found');
     final trades = await _tradeRepo.getTradesByUser(userId);
+    final tags = await _profileRepo.getTagsForUser(userId);
+    final tradeData = await Future.wait(trades.map(_tradeToJson));
 
     final data = {
       'version': 1,
       'exportedAt': DateTime.now().toIso8601String(),
       'profile': _profileToJson(profile),
-      'trades': trades.map(_tradeToJson).toList(),
+      'trades': tradeData,
+      'tags': tags.map(_tagToJson).toList(),
     };
 
     final json = const JsonEncoder.withIndent('  ').convert(data);
@@ -47,9 +52,12 @@ class BackupRepository {
 
     for (final p in profiles) {
       final trades = await _tradeRepo.getTradesByUser(p.id);
+      final tags = await _profileRepo.getTagsForUser(p.id);
+      final tradeData = await Future.wait(trades.map(_tradeToJson));
       allData.add({
         'profile': _profileToJson(p),
-        'trades': trades.map(_tradeToJson).toList(),
+        'trades': tradeData,
+        'tags': tags.map(_tagToJson).toList(),
       });
     }
 
@@ -68,29 +76,55 @@ class BackupRepository {
     return path ?? '';
   }
 
-  Future<void> importBackup(String filePath) async {
-    final file = File(filePath);
-    final content = await file.readAsString();
+  Future<BackupImportResult> importBackup(String filePath) async {
+    final content = await readBackupFile(filePath);
+    return importBackupContent(content);
+  }
+
+  Future<BackupImportResult> importBackupBytes(List<int> bytes) async {
+    final content = utf8.decode(bytes);
+    return importBackupContent(content);
+  }
+
+  Future<BackupImportResult> importBackupContent(String content) async {
     final data = jsonDecode(content) as Map<String, dynamic>;
 
+    final result = BackupImportResult();
     if (data.containsKey('users')) {
       // All-users backup
       for (final userData in data['users'] as List) {
-        await _importUserData(userData as Map<String, dynamic>);
+        await _importUserData(userData as Map<String, dynamic>, result);
       }
     } else if (data.containsKey('profile')) {
       // Single user backup
-      await _importUserData(data);
+      await _importUserData(data, result);
+    } else {
+      throw Exception('Invalid backup file: missing profile or users data.');
     }
+    return result;
   }
 
-  Future<void> _importUserData(Map<String, dynamic> data) async {
+  Future<void> _importUserData(
+    Map<String, dynamic> data,
+    BackupImportResult result,
+  ) async {
     final profile = _profileFromJson(data['profile'] as Map<String, dynamic>);
-    await _profileRepo.createProfile(profile);
+    await _profileRepo.upsertProfile(profile);
+    result.profileIds.add(profile.id);
+    result.profileCount++;
 
-    for (final tradeJson in data['trades'] as List) {
+    final tags = (data['tags'] as List?) ?? const [];
+    for (final tagJson in tags) {
+      final tag = _tagFromJson(tagJson as Map<String, dynamic>);
+      await _profileRepo.upsertTag(tag);
+      result.tagCount++;
+    }
+
+    final trades = (data['trades'] as List?) ?? const [];
+    for (final tradeJson in trades) {
       final trade = _tradeFromJson(tradeJson as Map<String, dynamic>);
-      await _tradeRepo.insertTrade(trade);
+      await _tradeRepo.upsertTrade(trade);
+      result.tradeCount++;
     }
   }
 
@@ -112,6 +146,20 @@ class BackupRepository {
             : 'sunday',
         'createdAt': p.createdAt.toIso8601String(),
       };
+
+  Map<String, dynamic> _tagToJson(Tag tag) => {
+        'id': tag.id,
+        'userId': tag.userId,
+        'label': tag.label,
+        'colorHex': tag.colorHex,
+      };
+
+  Tag _tagFromJson(Map<String, dynamic> j) => Tag(
+        id: j['id'] as String,
+        userId: j['userId'] as String,
+        label: j['label'] as String,
+        colorHex: j['colorHex'] as String,
+      );
 
   UserProfile _profileFromJson(Map<String, dynamic> j) => UserProfile(
         id: j['id'] as String,
@@ -135,7 +183,7 @@ class BackupRepository {
         createdAt: DateTime.parse(j['createdAt'] as String),
       );
 
-  Map<String, dynamic> _tradeToJson(Trade t) => {
+  Future<Map<String, dynamic>> _tradeToJson(Trade t) async => {
         'id': t.id,
         'userId': t.userId,
         'dateTimeTaken': t.dateTimeTaken.toIso8601String(),
@@ -152,6 +200,8 @@ class BackupRepository {
         'rulesFollowed': t.rulesFollowed.name,
         'entryImagePath': t.entryImagePath,
         'resultImagePath': t.resultImagePath,
+        'entryImageData': await imagePathToDataUrl(t.entryImagePath),
+        'resultImageData': await imagePathToDataUrl(t.resultImagePath),
         'createdAt': t.createdAt.toIso8601String(),
         'updatedAt': t.updatedAt.toIso8601String(),
       };
@@ -173,8 +223,10 @@ class BackupRepository {
         tags: List<String>.from(j['tags'] as List),
         comments: j['comments'] as String,
         rulesFollowed: _parseRulesFollowed(j['rulesFollowed'] as String),
-        entryImagePath: j['entryImagePath'] as String?,
-        resultImagePath: j['resultImagePath'] as String?,
+        entryImagePath: (j['entryImageData'] as String?) ??
+            (j['entryImagePath'] as String?),
+        resultImagePath: (j['resultImageData'] as String?) ??
+            (j['resultImagePath'] as String?),
         createdAt: DateTime.parse(j['createdAt'] as String),
         updatedAt: DateTime.parse(j['updatedAt'] as String),
       );
@@ -189,4 +241,14 @@ class BackupRepository {
         return RulesFollowed.yes;
     }
   }
+}
+
+class BackupImportResult {
+  final List<String> profileIds = [];
+  int profileCount = 0;
+  int tradeCount = 0;
+  int tagCount = 0;
+
+  String? get firstProfileId =>
+      profileIds.isEmpty ? null : profileIds.first;
 }

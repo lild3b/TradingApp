@@ -4,6 +4,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../blocs/backup/backup_bloc.dart';
 import '../../../blocs/user_profile/user_profile_bloc.dart';
+import '../../../blocs/analytics/analytics_bloc.dart';
+import '../../../blocs/calendar/calendar_bloc.dart';
+import '../../../blocs/journal/journal_bloc.dart';
 import '../../../theme/app_colors.dart';
 import '../../../utils/formatters.dart';
 import '../../../services/file_service.dart';
@@ -18,6 +21,26 @@ class BackupScreen extends StatelessWidget {
       body: BlocConsumer<BackupBloc, BackupState>(
         listener: (context, state) {
           if (state is BackupSuccess) {
+            if (state.importedProfileId != null) {
+              final importedProfileId = state.importedProfileId!;
+              context.read<UserProfileBloc>().add(
+                    LoadProfiles(selectProfileId: importedProfileId),
+                  );
+              context.read<AnalyticsBloc>().add(
+                    LoadAnalytics(importedProfileId),
+                  );
+              final now = DateTime.now();
+              context.read<CalendarBloc>().add(
+                    LoadCalendarMonth(
+                      userId: importedProfileId,
+                      year: now.year,
+                      month: now.month,
+                    ),
+                  );
+              context.read<JournalBloc>().add(
+                    LoadJournal(importedProfileId),
+                  );
+            }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(state.message),
@@ -160,8 +183,9 @@ class BackupScreen extends StatelessWidget {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
+      withData: true,
     );
-    if (result == null || result.files.single.path == null) return;
+    if (result == null) return;
     if (!context.mounted) return;
 
     final confirmed = await showDialog<bool>(
@@ -183,7 +207,32 @@ class BackupScreen extends StatelessWidget {
       ),
     );
     if (confirmed == true && context.mounted) {
-      context.read<BackupBloc>().add(ImportBackup(result.files.single.path!));
+      final pickedFile = result.files.single;
+      final bytes = pickedFile.bytes;
+
+      if (bytes != null) {
+        context.read<BackupBloc>().add(ImportBackupBytes(bytes));
+        return;
+      }
+
+      String? path;
+      try {
+        path = pickedFile.path;
+      } catch (_) {
+        path = null;
+      }
+
+      if (path != null) {
+        context.read<BackupBloc>().add(ImportBackup(path));
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selected backup file could not be read.'),
+          backgroundColor: AppColors.loss,
+        ),
+      );
     }
   }
 }

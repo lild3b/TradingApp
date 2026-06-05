@@ -8,7 +8,12 @@ abstract class UserProfileEvent extends Equatable {
 }
 
 class LoadProfiles extends UserProfileEvent {
-  const LoadProfiles();
+  const LoadProfiles({this.selectProfileId});
+
+  final String? selectProfileId;
+
+  @override
+  List<Object?> get props => [selectProfileId];
 }
 
 class SelectProfile extends UserProfileEvent {

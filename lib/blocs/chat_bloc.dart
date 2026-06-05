@@ -120,11 +120,16 @@ class SendChatMessageEvent extends ChatEvent {
 }
 
 class AnalyzeJournalEvent extends ChatEvent {
-  AnalyzeJournalEvent(this.journalContent);
+  AnalyzeJournalEvent({
+    required this.journalContent,
+    required this.userId,
+  });
+
   final String journalContent;
+  final String userId;
 
   @override
-  List<Object?> get props => [journalContent];
+  List<Object?> get props => [journalContent, userId];
 }
 
 class AnalyzeJournalFileEvent extends ChatEvent {
@@ -329,8 +334,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(_loadingState());
 
     try {
-      final response =
-          await _aiService.analyzeTradeJournal(event.journalContent);
+      final response = await _aiService.analyzeTradeJournal(
+        event.journalContent,
+        event.userId,
+      );
       _appendMessages([
         ChatMessage(
           content: response,

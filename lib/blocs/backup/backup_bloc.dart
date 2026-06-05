@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../repositories/backup_repository.dart';
+import 'backup_file_size.dart';
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,13 @@ class ImportBackup extends BackupEvent {
   final String filePath;
   @override
   List<Object?> get props => [filePath];
+}
+
+class ImportBackupBytes extends BackupEvent {
+  const ImportBackupBytes(this.bytes);
+  final List<int> bytes;
+  @override
+  List<Object?> get props => [bytes];
 }
 
 class ExportImages extends BackupEvent {
@@ -58,13 +65,16 @@ class BackupSuccess extends BackupState {
     required this.fileSize,
     required this.exportedAt,
     this.message = 'Backup completed successfully',
+    this.importedProfileId,
   });
   final String filePath;
   final String fileSize;
   final DateTime exportedAt;
   final String message;
+  final String? importedProfileId;
   @override
-  List<Object?> get props => [filePath, fileSize, exportedAt, message];
+  List<Object?> get props =>
+      [filePath, fileSize, exportedAt, message, importedProfileId];
 }
 
 class BackupError extends BackupState {
@@ -84,6 +94,7 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
     on<ExportUserBackup>(_onExportUser);
     on<ExportAllUsersBackup>(_onExportAll);
     on<ImportBackup>(_onImport);
+    on<ImportBackupBytes>(_onImportBytes);
     on<ExportImages>(_onExportImages);
   }
 
@@ -123,14 +134,36 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
   }
 
   Future<void> _onImport(ImportBackup event, Emitter<BackupState> emit) async {
+    await _import(
+      emit,
+      () => _backupRepo.importBackup(event.filePath),
+    );
+  }
+
+  Future<void> _onImportBytes(
+    ImportBackupBytes event,
+    Emitter<BackupState> emit,
+  ) async {
+    await _import(
+      emit,
+      () => _backupRepo.importBackupBytes(event.bytes),
+    );
+  }
+
+  Future<void> _import(
+    Emitter<BackupState> emit,
+    Future<BackupImportResult> Function() importAction,
+  ) async {
     emit(const BackupInProgress());
     try {
-      await _backupRepo.importBackup(event.filePath);
+      final result = await importAction();
       emit(BackupSuccess(
         filePath: '',
         fileSize: '',
         exportedAt: DateTime(0),
-        message: 'Import completed successfully',
+        message: 'Imported ${result.profileCount} profile(s), '
+            '${result.tradeCount} trade(s), and ${result.tagCount} tag(s)',
+        importedProfileId: result.firstProfileId,
       ));
     } catch (e) {
       emit(BackupError(e.toString()));
@@ -154,14 +187,6 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
 
   Future<String> _getFileSize(String path) async {
     if (path.isEmpty) return '0 KB';
-    try {
-      final file = File(path);
-      final bytes = await file.length();
-      if (bytes < 1024) return '$bytes B';
-      if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    } catch (_) {
-      return 'Unknown';
-    }
+    return getBackupFileSize(path);
   }
 }
