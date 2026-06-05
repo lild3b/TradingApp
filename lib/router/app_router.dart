@@ -9,6 +9,7 @@ import '../screens/lock/lock_screen.dart';
 import '../screens/dashboard/dashboard_screen.dart';
 import '../screens/calendar/calendar_screen.dart';
 import '../screens/journal/journal_screen.dart';
+import '../screens/news/news_screen.dart';
 import '../screens/trade_detail/trade_detail_screen.dart';
 import '../screens/tools/tools_hub/tools_hub_screen.dart';
 import '../screens/tools/risk_calculator/risk_calculator_screen.dart';
@@ -82,6 +83,10 @@ GoRouter createRouter(BuildContext context) {
           GoRoute(
             path: '/journal',
             pageBuilder: (context, state) => _fade(state, const JournalScreen()),
+          ),
+          GoRoute(
+            path: '/news',
+            pageBuilder: (context, state) => _fade(state, const NewsScreen()),
           ),
           GoRoute(
             path: '/tools',

@@ -6,9 +6,14 @@ import '../services/ai_trading_service.dart';
 import '../services/secure_storage_service.dart';
 
 class ChatModal extends StatefulWidget {
-  const ChatModal({super.key, this.initialJournalContent});
+  const ChatModal({
+    super.key,
+    this.initialJournalContent,
+    this.initialJournalUserId,
+  });
 
   final String? initialJournalContent;
+  final String? initialJournalUserId;
 
   @override
   State<ChatModal> createState() => _ChatModalState();
@@ -21,6 +26,7 @@ class _ChatModalState extends State<ChatModal> {
   final TextEditingController _modelController = TextEditingController();
   late ChatBloc _chatBloc;
   late GrokTradingService _grokService;
+  String? _profileId;
   bool _apiConfigured = false;
   bool _loadingSavedConfig = true;
   bool _initialJournalAnalysisStarted = false;
@@ -41,6 +47,7 @@ class _ChatModalState extends State<ChatModal> {
       profileId = null;
     }
 
+    _profileId = profileId;
     _chatBloc = ChatBloc(aiService: _grokService, profileId: profileId);
     _chatBloc.add(InitializeChatEvent());
     _loadSavedApiConfig();
@@ -118,7 +125,10 @@ class _ChatModalState extends State<ChatModal> {
 
     _initialJournalAnalysisStarted = true;
     _chatBloc.add(NewChatConversationEvent(title: 'Journal analysis'));
-    _chatBloc.add(AnalyzeJournalEvent(journalContent));
+    _chatBloc.add(AnalyzeJournalEvent(
+      journalContent: journalContent,
+      userId: widget.initialJournalUserId ?? _profileId ?? 'unknown',
+    ));
   }
 
   void _sendMessage() {

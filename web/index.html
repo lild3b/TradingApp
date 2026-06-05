@@ -33,6 +33,18 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+  <script>
+    const originalInitSqlJs = window.initSqlJs;
+    window.initSqlJs = function(config) {
+      return originalInitSqlJs({
+        locateFile: function(file) {
+          return 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/' + file;
+        },
+        ...(config || {})
+      });
+    };
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

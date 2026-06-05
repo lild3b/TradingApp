@@ -33,7 +33,7 @@ class AiTradingServiceException implements Exception {
 abstract class AiTradingService {
   Future<String> getTradingAdvice(String query,
       {List<ChatMessage>? conversationHistory});
-  Future<String> analyzeTradeJournal(String journalContent);
+  Future<String> analyzeTradeJournal(String journalContent, [String? userId]);
   Future<String> analyzeTradeJournalFromFile(String filePath);
   Future<void> dispose();
   bool get isApiKeySet;
@@ -45,36 +45,173 @@ class GrokTradingService implements AiTradingService {
       'https://api.groq.com/openai/v1/chat/completions';
 
   final String _systemPrompt =
-      '''You are an expert AI trading assistant. Your primary responsibilities are:
+      '''You are an elite AI Trading Performance Coach and Market Analysis Assistant specializing in discretionary and systematic trading across Forex, indices, commodities, crypto, and equities.
 
-1. **Answer Trading Questions**: Provide clear, actionable trading advice covering:
-   - Risk management strategies and position sizing
-   - Technical and fundamental analysis techniques
-   - Trading psychology and emotional control
-   - Market analysis and trend identification
-   - Portfolio management and diversification
+Your role is to help traders improve consistency, discipline, execution quality, and risk management through data-driven analysis and actionable feedback.
 
-2. **Analyze Trade Journals Automatically**: When analyzing trading journals:
-   - Extract and analyze all trades from the provided data
-   - Calculate key metrics (win rate, risk-reward ratio, profit factor)
-   - Identify patterns in winning and losing trades
-   - Highlight strengths and areas for improvement
-   - Provide specific, actionable recommendations
+========================
+CORE RESPONSIBILITIES
+========================
 
-3. **Key Guidelines**:
-   - Always emphasize risk management (risk no more than 1-2% per trade)
-   - Use data-driven analysis when evaluating performance
-   - Identify trading patterns and provide constructive feedback
-   - Focus on long-term sustainable trading improvements
-   - Be encouraging but honest about performance issues
+1. Trading Education & Guidance
+Provide clear, practical, and professional guidance on:
+- Risk management and capital preservation
+- Position sizing and exposure control
+- Technical analysis and market structure
+- Fundamental and macroeconomic analysis
+- Trading psychology and emotional discipline
+- Portfolio management and diversification
+- Trade execution and journaling
+- Strategy optimization and performance review
 
-When analyzing journals, always provide:
-- Summary statistics (total trades, win rate, average profit/loss)
-- Pattern analysis (best and worst performing setups)
-- Risk assessment (position sizing, stop loss adherence)
-- Specific recommendations for improvement
+Always prioritize:
+- Long-term consistency over short-term gains
+- Probability and risk-adjusted returns
+- Discipline, patience, and process adherence
+- Protection of trading capital
 
-Remember: You are an expert trading AI. Be concise, practical, and focused on actionable insights.''';
+========================
+RISK MANAGEMENT RULES
+========================
+
+Always reinforce professional risk management principles:
+- Recommend risking no more than 1–2% of account equity per trade
+- Encourage favorable risk-to-reward ratios (minimum 1:1.5 preferred)
+- Emphasize stop losses and predefined invalidation levels
+- Warn against revenge trading, overleveraging, and emotional decision-making
+- Promote consistency over aggressive growth
+
+If the user shows signs of poor discipline or excessive risk-taking:
+- Clearly identify the issue
+- Explain the consequences objectively
+- Provide corrective actions
+
+========================
+TRADE JOURNAL ANALYSIS
+========================
+
+When provided with trading journal data, screenshots, CSVs, or trade logs:
+
+A. Extract and Analyze
+Automatically identify:
+- Entry and exit prices
+- Position direction (long/short)
+- Risk-to-reward ratio
+- Win/loss outcomes
+- Trade duration
+- Setup type or strategy
+- Timeframe used
+- Session traded (London, New York, Asia)
+- Position sizing behavior
+
+B. Calculate Key Metrics
+Always compute:
+- Total trades
+- Win rate
+- Average win
+- Average loss
+- Net profit/loss
+- Profit factor
+- Expectancy
+- Average R multiple
+- Largest drawdown
+- Consecutive wins/losses
+- Risk-adjusted performance insights
+
+C. Pattern Recognition
+Identify:
+- Best-performing setups
+- Worst-performing setups
+- Time/session performance trends
+- Emotional or impulsive behavior
+- Overtrading patterns
+- Early exits or late entries
+- Poor risk management habits
+- Consistency of execution
+
+D. Provide Structured Feedback
+Always include:
+1. Performance Summary
+2. Strengths
+3. Weaknesses
+4. Risk Assessment
+5. Behavioral/Psychology Insights
+6. Actionable Improvement Plan
+
+Recommendations must be:
+- Specific
+- Measurable
+- Realistic
+- Prioritized
+
+========================
+ANALYSIS FRAMEWORK
+========================
+
+When discussing trades or markets:
+- Use probability-based reasoning
+- Distinguish between confirmation and speculation
+- Explain market structure clearly
+- Identify trend, momentum, liquidity, volatility, and key levels
+- Discuss invalidation points and trade scenarios
+- Focus on process quality, not just PnL
+
+Never present opinions as certainty.
+
+========================
+COMMUNICATION STYLE
+========================
+
+Your tone should be:
+- Professional
+- Concise
+- Analytical
+- Encouraging but honest
+- Focused on actionable insights
+
+Avoid:
+- Hype
+- Gambling mentality
+- Unrealistic profit expectations
+- Emotional language
+- Overcomplicated explanations
+
+When appropriate:
+- Use bullet points and structured formatting
+- Provide step-by-step breakdowns
+- Summarize key takeaways clearly
+
+========================
+COACHING PRINCIPLES
+========================
+
+Act like a professional trading mentor:
+- Encourage discipline and accountability
+- Reinforce process over outcomes
+- Promote journaling and review habits
+- Help the trader identify repeatable edges
+- Focus on continuous improvement
+
+If the trader performs poorly:
+- Be direct but constructive
+- Identify root causes
+- Suggest practical corrections
+
+If the trader performs well:
+- Reinforce the behaviors creating consistency
+- Warn against complacency or overconfidence
+
+========================
+IMPORTANT LIMITATIONS
+========================
+
+- Do not guarantee profits or certainty
+- Do not encourage reckless leverage or gambling behavior
+- Do not provide financial advice framed as guaranteed outcomes
+- Acknowledge uncertainty and market risk
+- Always prioritize capital preservation
+
+Your objective is to help traders become disciplined, data-driven, and consistently profitable over time.''';
 
   String? _apiKey;
   String? _model;
@@ -130,7 +267,7 @@ Remember: You are an expert trading AI. Be concise, practical, and focused on ac
               'model': _model,
               'messages': messages,
               'max_completion_tokens': 1024,
-              'temperature': 1,
+              'temperature': 0,
               //'reasoning_effort': 'medium',
               'stop': null,
               'top_p': 1,
@@ -260,26 +397,75 @@ Remember: You are an expert trading AI. Be concise, practical, and focused on ac
   }
 
   @override
-  Future<String> analyzeTradeJournal(String journalContent) async {
-    if (journalContent.isEmpty) {
+  Future<String> analyzeTradeJournal(
+    String journalContent, [
+    String? userId,
+  ]) async {
+    final trimmedJournalContent = journalContent.trim();
+    if (trimmedJournalContent.isEmpty) {
       return 'No journal content provided for analysis.';
     }
 
+    if (!isApiKeySet || _model == null || _model!.isEmpty) {
+      return 'Journal analysis requires a configured Groq API key and model. '
+          'I will not generate analysis without the configured model because '
+          'the response must be based only on the journal data feed.';
+    }
+
+    final feedUserId = userId?.trim();
+    final computedSummary =
+        _buildDeterministicJournalSummary(trimmedJournalContent);
     final analysisPrompt =
-        '''Please analyze the following trading journal data and provide comprehensive insights:
+        '''You are a trading coach giving a direct, personal performance review. Speak to the trader using "you" and "your" at all times.
 
-$journalContent
+        RULES YOU MUST FOLLOW:
+        - Use ONLY the data inside JOURNAL DATA. Never invent values, patterns, or examples.
+        - The SUMMARY block is authoritative. Use its numbers exactly. Do not recalculate.
+        - If any metric cannot be traced to a specific row or column in the data, write: "Not available in provided data."
+        - Skip any analysis that requires a column not present in the data.
+        - Do NOT write a statistics section. The app already shows the SUMMARY separately.
+        - Be direct and honest. Not clinical. Not cheerleading.
 
-Provide analysis including:
-1. Summary Statistics (total trades, win rate, average profit/loss)
-2. Pattern Analysis (best and worst performing setups)
-3. Risk Assessment (position sizing, stop loss adherence)
-4. Strengths and Weaknesses
-5. Specific Recommendations for Improvement
+        USER ID: ${feedUserId == null || feedUserId.isEmpty ? 'unknown' : feedUserId}
 
-Return the final analysis as visible assistant message content.''';
+        SUMMARY:
+        $computedSummary
 
-    return getTradingAdvice(analysisPrompt);
+        JOURNAL DATA:
+        $trimmedJournalContent
+
+        Write the review in these four sections using bold headers:
+
+        **What Your Patterns Are Telling You**
+        Describe recurring behaviors, setups, timeframes, or session habits visible in the rows. Name the column and frequency or value range for each. If fewer than 3 rows support a pattern, add: "Early signal — not yet confirmed."
+
+        **How You Are Managing Risk**
+        Use only Risk, Reward, R:R Ratio, PnL, and Rules Followed columns. Tell the trader: how consistent their R:R has been, whether following rules improved PnL, what their worst trades had in common, and any risk escalation patterns.
+
+        **Where You Are Strong and Where You Are Leaking**
+        Format each item as:
+        ✅ You are doing this well: [observation] — [column + value]
+        ⚠️ This is costing you: [observation] — [column + value]
+        Every item must cite the data. No exceptions.
+
+        **What You Should Do Next**
+        Give 3 to 5 specific actions ordered by impact. Format each as:
+        → [Action]: [what to do] | Why: [column, value, or pattern behind it]
+
+        Return plain text only. No code blocks. No preamble.''';
+
+    _printJournalAnalysisFeed(
+      userId: feedUserId,
+      computedSummary: computedSummary,
+      journalContent: trimmedJournalContent,
+      prompt: analysisPrompt,
+    );
+
+    final aiAnalysis = await getTradingAdvice(analysisPrompt);
+    return '**Computed Journal Summary**\n'
+        '$computedSummary\n\n'
+        '**AI Analysis**\n'
+        '$aiAnalysis';
   }
 
   @override
@@ -328,6 +514,83 @@ Return the final analysis as visible assistant message content.''';
     }
 
     return buffer.toString();
+  }
+
+  void _printJournalAnalysisFeed({
+    required String? userId,
+    required String computedSummary,
+    required String journalContent,
+    required String prompt,
+  }) {
+    print('--- Journal analysis data feed start ---');
+    print('User ID: ${userId == null || userId.isEmpty ? 'unknown' : userId}');
+    print('--- Computed journal summary start ---');
+    print(computedSummary);
+    print('--- Computed journal summary end ---');
+    print(journalContent);
+    print('--- Journal analysis data feed end ---');
+    print('--- Journal analysis prompt start ---');
+    print(prompt);
+    print('--- Journal analysis prompt end ---');
+  }
+
+  String _buildDeterministicJournalSummary(String journalContent) {
+    try {
+      final rows = const CsvToListConverter().convert(journalContent);
+      if (rows.isEmpty) return 'Total Trades: 0';
+
+      final headers = rows.first.map((h) => h.toString().trim()).toList();
+      final dataRows = rows.skip(1).toList();
+      final pnlIndex = headers.indexOf('PnL');
+
+      var wins = 0;
+      var losses = 0;
+      var breakeven = 0;
+      var grossProfit = 0.0;
+      var grossLoss = 0.0;
+      var netPnl = 0.0;
+
+      for (final row in dataRows) {
+        final pnl = pnlIndex >= 0 && pnlIndex < row.length
+            ? double.tryParse(row[pnlIndex].toString())
+            : null;
+        if (pnl == null) continue;
+
+        netPnl += pnl;
+        if (pnl > 0) {
+          wins++;
+          grossProfit += pnl;
+        } else if (pnl < 0) {
+          losses++;
+          grossLoss += pnl.abs();
+        } else {
+          breakeven++;
+        }
+      }
+
+      final totalTrades = dataRows.length;
+      final winRate = totalTrades > 0 ? wins / totalTrades * 100 : 0.0;
+      final averageWin = wins > 0 ? grossProfit / wins : 0.0;
+      final averageLoss = losses > 0 ? grossLoss / losses : 0.0;
+      final profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0.0;
+      final expectancy = totalTrades > 0 ? netPnl / totalTrades : 0.0;
+
+      return [
+        'Total Trades: $totalTrades',
+        'Columns: ${headers.join(', ')}',
+        'Wins: $wins',
+        'Losses: $losses',
+        'Breakeven Trades: $breakeven',
+        'Win Rate: ${winRate.toStringAsFixed(2)}%',
+        'Average Profit: ${averageWin.toStringAsFixed(2)}',
+        'Average Loss: ${averageLoss.toStringAsFixed(2)}',
+        'Net PnL: ${netPnl.toStringAsFixed(2)}',
+        'Profit Factor: ${profitFactor.toStringAsFixed(2)}',
+        'Expectancy: ${expectancy.toStringAsFixed(2)}',
+      ].join('\n');
+    } catch (e) {
+      return 'Unable to compute deterministic summary from provided data: $e';
+    }
   }
 
   String _getFallbackResponse(String query) {

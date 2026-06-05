@@ -30,6 +30,15 @@ class UserProfileRepository {
     await _dao.insertProfile(_toCompanion(profile));
   }
 
+  Future<void> upsertProfile(UserProfile profile) async {
+    final existing = await getProfileById(profile.id);
+    if (existing == null) {
+      await createProfile(profile);
+    } else {
+      await updateProfile(profile);
+    }
+  }
+
   Future<void> updateProfile(UserProfile profile) async {
     await _dao.updateProfile(_toCompanion(profile));
   }
@@ -54,6 +63,21 @@ class UserProfileRepository {
       label: Value(tag.label),
       colorHex: Value(tag.colorHex),
     ));
+  }
+
+  Future<void> upsertTag(Tag tag) async {
+    final existingTags = await getTagsForUser(tag.userId);
+    final exists = existingTags.any((existing) => existing.id == tag.id);
+    if (exists) {
+      await _tagDao.updateTag(TagsTableCompanion(
+        id: Value(tag.id),
+        userId: Value(tag.userId),
+        label: Value(tag.label),
+        colorHex: Value(tag.colorHex),
+      ));
+    } else {
+      await createTag(tag);
+    }
   }
 
   Future<void> deleteTag(String tagId) async {

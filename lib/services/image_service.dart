@@ -1,7 +1,7 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'package:flutter/foundation.dart';
+import 'image_file_storage.dart';
 
 class ImageService {
   ImageService._();
@@ -18,36 +18,28 @@ class ImageService {
       maxHeight: 1080,
     );
     if (xFile == null) return null;
-    return _copyToAppDir(xFile.path);
-  }
-
-  Future<String> _copyToAppDir(String sourcePath) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final imagesDir = Directory(p.join(dir.path, 'trade_images'));
-    if (!await imagesDir.exists()) {
-      await imagesDir.create(recursive: true);
+    if (kIsWeb) {
+      final bytes = await xFile.readAsBytes();
+      final mimeType = xFile.mimeType ?? _mimeTypeForName(xFile.name);
+      return 'data:$mimeType;base64,${base64Encode(bytes)}';
     }
-    final filename = '${DateTime.now().millisecondsSinceEpoch}_${p.basename(sourcePath)}';
-    final destPath = p.join(imagesDir.path, filename);
-    await File(sourcePath).copy(destPath);
-    return destPath;
+    return copyImageToAppDir(xFile.path);
   }
 
   Future<void> deleteImage(String path) async {
-    final file = File(path);
-    if (await file.exists()) {
-      await file.delete();
+    if (!path.startsWith('data:')) {
+      await deleteStoredImage(path);
     }
   }
 
   Future<List<String>> getAllTradeImages() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final imagesDir = Directory(p.join(dir.path, 'trade_images'));
-    if (!await imagesDir.exists()) return [];
-    return imagesDir
-        .listSync()
-        .whereType<File>()
-        .map((f) => f.path)
-        .toList();
+    return getStoredTradeImages();
+  }
+
+  String _mimeTypeForName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
   }
 }

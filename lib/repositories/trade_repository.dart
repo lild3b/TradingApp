@@ -34,6 +34,15 @@ class TradeRepository {
     await _dao.insertTrade(_toCompanion(trade));
   }
 
+  Future<void> upsertTrade(Trade trade) async {
+    final existing = await getTradeById(trade.id);
+    if (existing == null) {
+      await insertTrade(trade);
+    } else {
+      await updateTrade(trade);
+    }
+  }
+
   Future<void> updateTrade(Trade trade) async {
     await _dao.updateTrade(_toCompanion(trade));
   }

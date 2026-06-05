@@ -166,6 +166,7 @@ class _JournalScreenState extends State<JournalScreen> {
               context: context,
               builder: (_) => ChatModal(
                 initialJournalContent: state.journalContent,
+                initialJournalUserId: state.userId,
               ),
             );
           } else if (state is JournalError) {

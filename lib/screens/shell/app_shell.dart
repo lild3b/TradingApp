@@ -23,6 +23,11 @@ class AppShell extends StatelessWidget {
         label: 'Journal',
         route: '/journal'),
     _NavDest(
+        icon: Icons.newspaper_outlined,
+        activeIcon: Icons.newspaper_rounded,
+        label: 'News',
+        route: '/news'),
+    _NavDest(
         icon: Icons.construction_outlined,
         activeIcon: Icons.construction_rounded,
         label: 'Tools',
@@ -195,7 +200,7 @@ class _DesktopLayout extends StatelessWidget {
                             color: theme.colorScheme.primary, size: 28),
                         const SizedBox(width: 10),
                         Text(
-                          'TradingJournal',
+                          'DendiFX',
                           style: theme.textTheme.titleMedium,
                         ),
                       ],

@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../../blocs/analytics/analytics_bloc.dart';
 import '../../blocs/streak/streak_bloc.dart';
 import '../../blocs/user_profile/user_profile_bloc.dart';
 import '../../models/analytics_data.dart';
+import '../../models/user_profile.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/metric_card.dart';
@@ -328,7 +330,7 @@ class _ChartSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text('PnL — Last 30 Days',
+              Text('Account performance',
                   style: Theme.of(context).textTheme.titleSmall),
               const Spacer(),
               TextButton(
@@ -337,17 +339,87 @@ class _ChartSection extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 180,
-            child: data.last30DaysPnl.isEmpty
-                ? Center(
-                    child: Text('No trade data yet',
-                        style: Theme.of(context).textTheme.bodySmall))
-                : showBarChart
-                    ? _BarChart(entries: data.last30DaysPnl)
-                    : _LineChart(entries: data.last30DaysPnl),
-          ),
+          const SizedBox(height: 12),
+          Builder(builder: (context) {
+            final profileState = context.watch<UserProfileBloc>().state;
+            final isPropFirm = profileState is ProfileSelected &&
+                profileState.selectedProfile.accountType ==
+                    AccountType.propFirm;
+            final startingBalance = data.balance;
+            final cumulativeEntries = <MapEntry<DateTime, double>>[];
+            var runningBalance = startingBalance;
+            for (final entry in data.last30DaysPnl) {
+              runningBalance += entry.value;
+              cumulativeEntries.add(MapEntry(entry.key, runningBalance));
+            }
+            final dailyLossLimit = startingBalance - data.dailyPermittedLoss;
+            final maxDrawdownLimit = startingBalance - data.maxPermittedLoss;
+            final profitTarget = startingBalance + data.maxPermittedLoss;
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    _ChartBadge(
+                      label: 'Equity',
+                      value: AppFormatters.currency(data.equity),
+                      color: AppColors.profit,
+                    ),
+                    _ChartBadge(
+                      label: 'Account size',
+                      value: AppFormatters.currency(startingBalance),
+                      color: AppColors.neutral,
+                    ),
+                    _ChartBadge(
+                      label: 'Max loss',
+                      value: AppFormatters.currency(data.maxPermittedLoss),
+                      color: AppColors.loss,
+                    ),
+                    _ChartBadge(
+                      label: 'Daily max loss',
+                      value: AppFormatters.currency(data.dailyPermittedLoss),
+                      color: AppColors.warningYellow,
+                    ),
+                    _ChartBadge(
+                      label: 'Profit target',
+                      value: AppFormatters.currency(profitTarget),
+                      color: AppColors.profit,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 240,
+                  child: data.last30DaysPnl.isEmpty
+                      ? Center(
+                          child: Text('No trade data yet',
+                              style: Theme.of(context).textTheme.bodySmall))
+                      : showBarChart
+                          ? _BarChart(
+                              entries: cumulativeEntries,
+                              startingBalance: startingBalance,
+                              isPropFirm: isPropFirm,
+                              dailyLossLimit: dailyLossLimit,
+                              maxDrawdownLimit: maxDrawdownLimit,
+                              profitTargetLine:
+                                  isPropFirm ? profitTarget : null,
+                            )
+                          : _LineChart(
+                              entries: cumulativeEntries,
+                              startingBalance: startingBalance,
+                              isPropFirm: isPropFirm,
+                              dailyLossLimit: dailyLossLimit,
+                              maxDrawdownLimit: maxDrawdownLimit,
+                              profitTargetLine:
+                                  isPropFirm ? profitTarget : null,
+                            ),
+                ),
+              ],
+            );
+          }),
         ],
       ),
     );
@@ -355,8 +427,79 @@ class _ChartSection extends StatelessWidget {
 }
 
 class _LineChart extends StatelessWidget {
-  const _LineChart({required this.entries});
+  const _LineChart({
+    required this.entries,
+    required this.startingBalance,
+    required this.isPropFirm,
+    required this.dailyLossLimit,
+    required this.maxDrawdownLimit,
+    required this.profitTargetLine,
+  });
+
   final List<MapEntry<DateTime, double>> entries;
+  final double startingBalance;
+  final bool isPropFirm;
+  final double dailyLossLimit;
+  final double maxDrawdownLimit;
+  final double? profitTargetLine;
+
+  double _minY() {
+    final values = entries.map((e) => e.value).toList();
+    final minValue = values.isEmpty ? startingBalance : values.reduce(min);
+    var minY = min(startingBalance, minValue);
+    if (isPropFirm) {
+      minY = min(minY, dailyLossLimit);
+      minY = min(minY, maxDrawdownLimit);
+    }
+    return minY * 0.95;
+  }
+
+  double _maxY() {
+    final values = entries.map((e) => e.value).toList();
+    final maxValue = values.isEmpty ? startingBalance : values.reduce(max);
+    var maxY = max(startingBalance, maxValue);
+    if (profitTargetLine != null) {
+      maxY = max(maxY, profitTargetLine!);
+    }
+    return maxY * 1.05;
+  }
+
+  List<HorizontalLine> _buildLines() {
+    final lines = <HorizontalLine>[
+      HorizontalLine(
+        y: startingBalance,
+        color: AppColors.neutral.withValues(alpha: 0.4),
+        strokeWidth: 1,
+      ),
+    ];
+
+    if (isPropFirm) {
+      lines.addAll([
+        HorizontalLine(
+          y: dailyLossLimit,
+          color: AppColors.loss.withValues(alpha: 0.8),
+          strokeWidth: 1.5,
+          dashArray: [4, 4],
+        ),
+        HorizontalLine(
+          y: maxDrawdownLimit,
+          color: AppColors.loss.withValues(alpha: 0.95),
+          strokeWidth: 2,
+          dashArray: [2, 4],
+        ),
+      ]);
+      if (profitTargetLine != null) {
+        lines.add(HorizontalLine(
+          y: profitTargetLine!,
+          color: AppColors.profit.withValues(alpha: 0.8),
+          strokeWidth: 1.5,
+          dashArray: [4, 4],
+        ));
+      }
+    }
+
+    return lines;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -364,10 +507,50 @@ class _LineChart extends StatelessWidget {
       return FlSpot(e.key.toDouble(), e.value.value);
     }).toList();
 
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final gridColor = (isDark ? AppColors.darkDivider : AppColors.lightDivider)
+        .withOpacity(0.15);
+
     return LineChart(
       LineChartData(
-        gridData: const FlGridData(show: false),
-        titlesData: const FlTitlesData(show: false),
+        minY: _minY(),
+        maxY: _maxY(),
+        gridData: FlGridData(
+          show: true,
+          drawHorizontalLine: true,
+          drawVerticalLine: false,
+          horizontalInterval: (_maxY() - _minY()) / 4,
+          getDrawingHorizontalLine: (value) => FlLine(
+            color: gridColor,
+            strokeWidth: 1,
+          ),
+        ),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  AppFormatters.currency(value),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              reservedSize: 70,
+              interval: (_maxY() - _minY()) / 4,
+            ),
+          ),
+          bottomTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+        ),
         borderData: FlBorderData(show: false),
         lineBarsData: [
           LineChartBarData(
@@ -382,44 +565,197 @@ class _LineChart extends StatelessWidget {
           ),
         ],
         extraLinesData: ExtraLinesData(
-          horizontalLines: [
-            HorizontalLine(
-                y: 0,
-                color: AppColors.neutral.withValues(alpha: 0.4),
-                strokeWidth: 1),
-          ],
+          horizontalLines: _buildLines(),
         ),
       ),
     );
   }
 }
 
-class _BarChart extends StatelessWidget {
-  const _BarChart({required this.entries});
-  final List<MapEntry<DateTime, double>> entries;
+class _ChartBadge extends StatelessWidget {
+  const _ChartBadge({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(color: color)),
+          const SizedBox(height: 2),
+          Text(value,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class _BarChart extends StatelessWidget {
+  const _BarChart({
+    required this.entries,
+    required this.startingBalance,
+    required this.isPropFirm,
+    required this.dailyLossLimit,
+    required this.maxDrawdownLimit,
+    required this.profitTargetLine,
+  });
+
+  final List<MapEntry<DateTime, double>> entries;
+  final double startingBalance;
+  final bool isPropFirm;
+  final double dailyLossLimit;
+  final double maxDrawdownLimit;
+  final double? profitTargetLine;
+
+  double _minY() {
+    final values = entries.map((e) => e.value).toList();
+    final minValue = values.isEmpty ? startingBalance : values.reduce(min);
+    var minY = min(startingBalance, minValue);
+    if (isPropFirm) {
+      minY = min(minY, dailyLossLimit);
+      minY = min(minY, maxDrawdownLimit);
+    }
+    return minY * 0.95;
+  }
+
+  double _maxY() {
+    final values = entries.map((e) => e.value).toList();
+    final maxValue = values.isEmpty ? startingBalance : values.reduce(max);
+    var maxY = max(startingBalance, maxValue);
+    if (profitTargetLine != null) {
+      maxY = max(maxY, profitTargetLine!);
+    }
+    return maxY * 1.05;
+  }
+
+  List<HorizontalLine> _buildLines() {
+    final lines = <HorizontalLine>[
+      HorizontalLine(
+        y: startingBalance,
+        color: AppColors.neutral.withValues(alpha: 0.4),
+        strokeWidth: 1,
+      ),
+    ];
+
+    if (isPropFirm) {
+      lines.addAll([
+        HorizontalLine(
+          y: dailyLossLimit,
+          color: AppColors.loss.withValues(alpha: 0.8),
+          strokeWidth: 1.5,
+          dashArray: [4, 4],
+        ),
+        HorizontalLine(
+          y: maxDrawdownLimit,
+          color: AppColors.loss.withValues(alpha: 0.95),
+          strokeWidth: 2,
+          dashArray: [2, 4],
+        ),
+      ]);
+      if (profitTargetLine != null) {
+        lines.add(HorizontalLine(
+          y: profitTargetLine!,
+          color: AppColors.profit.withValues(alpha: 0.8),
+          strokeWidth: 1.5,
+          dashArray: [4, 4],
+        ));
+      }
+    }
+
+    return lines;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final gridColor = (isDark ? AppColors.darkDivider : AppColors.lightDivider)
+        .withOpacity(0.15);
+
     return BarChart(
       BarChartData(
-        gridData: const FlGridData(show: false),
-        titlesData: const FlTitlesData(show: false),
+        minY: _minY(),
+        maxY: _maxY(),
+        gridData: FlGridData(
+          show: true,
+          drawHorizontalLine: true,
+          drawVerticalLine: false,
+          horizontalInterval: (_maxY() - _minY()) / 4,
+          getDrawingHorizontalLine: (value) => FlLine(
+            color: gridColor,
+            strokeWidth: 1,
+          ),
+        ),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  AppFormatters.currency(value),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              reservedSize: 70,
+              interval: (_maxY() - _minY()) / 4,
+            ),
+          ),
+          bottomTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+        ),
         borderData: FlBorderData(show: false),
         barGroups: entries.asMap().entries.map((e) {
-          final pnl = e.value.value;
+          final value = e.value.value;
+          final fromY = min(startingBalance, value);
+          final toY = max(startingBalance, value);
           return BarChartGroupData(
             x: e.key,
             barRods: [
               BarChartRodData(
-                toY: pnl,
-                fromY: pnl < 0 ? pnl : 0,
-                color: pnl >= 0 ? AppColors.profit : AppColors.loss,
+                fromY: fromY,
+                toY: toY,
+                color: value >= startingBalance
+                    ? AppColors.profit
+                    : AppColors.loss,
                 width: 6,
                 borderRadius: BorderRadius.circular(3),
               ),
             ],
           );
         }).toList(),
+        extraLinesData: ExtraLinesData(
+          horizontalLines: _buildLines(),
+        ),
       ),
     );
   }

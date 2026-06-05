@@ -24,6 +24,18 @@ class UserProfileBloc extends Bloc<UserProfileEvent, UserProfileState> {
     emit(const ProfilesLoading());
     try {
       final profiles = await _repository.getAllProfiles();
+      final selectProfileId = event.selectProfileId;
+      if (selectProfileId != null) {
+        for (final profile in profiles) {
+          if (profile.id == selectProfileId) {
+            emit(ProfileSelected(
+              profiles: profiles,
+              selectedProfile: profile,
+            ));
+            return;
+          }
+        }
+      }
       emit(ProfilesLoaded(profiles: profiles));
     } catch (e) {
       emit(ProfileError(e.toString()));

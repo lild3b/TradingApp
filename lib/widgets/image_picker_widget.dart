@@ -1,8 +1,11 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/image_service.dart';
 import '../theme/app_colors.dart';
+import 'image_file_preview.dart';
 
 class ImagePickerWidget extends StatelessWidget {
   const ImagePickerWidget({
@@ -120,11 +123,7 @@ class _ImagePreview extends StatelessWidget {
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(10),
-          child: Image.file(
-            File(imagePath),
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
-          ),
+          child: _buildImage(imagePath),
         ),
         Positioned(
           top: 8,
@@ -143,5 +142,30 @@ class _ImagePreview extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  Widget _buildImage(String path) {
+    if (path.startsWith('data:')) {
+      final bytes = _bytesFromDataUrl(path);
+      if (bytes != null) {
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+        );
+      }
+    }
+
+    return ImageFilePreview(path: path);
+  }
+
+  Uint8List? _bytesFromDataUrl(String dataUrl) {
+    final commaIndex = dataUrl.indexOf(',');
+    if (commaIndex == -1) return null;
+    try {
+      return base64Decode(dataUrl.substring(commaIndex + 1));
+    } catch (_) {
+      return null;
+    }
   }
 }
