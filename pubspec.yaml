@@ -53,9 +53,16 @@ dev_dependencies:
   drift_dev: "^2.20.3"
   build_runner: "2.4.9"
   flutter_lints: "^5.0.0"
+  inno_bundle: ^0.11.2
 flutter:
   uses-material-design: true
   assets:
     - "assets/images/"
+
 inno_build:
   app_id: "8f1ad8f9-e63d-47d5-b199-ba61c09f5b23"
+
+inno_bundle:
+  id: f887d5f0-4690-1e07-8efc-d16ea7711bfb # <-- Put your app id here
+  publisher: Dendimaki # Optional, but recommended.
+  name: DendiFX # Also optional, but recommended.

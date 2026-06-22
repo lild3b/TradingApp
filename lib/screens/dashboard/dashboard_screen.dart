@@ -4,11 +4,13 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import '../../blocs/analytics/analytics_bloc.dart';
 import '../../blocs/streak/streak_bloc.dart';
 import '../../blocs/user_profile/user_profile_bloc.dart';
 import '../../models/analytics_data.dart';
 import '../../models/user_profile.dart';
+import '../../services/economic_news_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/metric_card.dart';
@@ -242,8 +244,12 @@ class _MetricGrid extends StatelessWidget {
         mainAxisSpacing: 10,
         childAspectRatio: 1.4,
       ),
-      itemCount: metrics.length,
+      itemCount: metrics.length + 1,
       itemBuilder: (context, i) {
+        if (i == metrics.length) {
+          return const _HighImpactNewsTile();
+        }
+
         final m = metrics[i];
         return MetricCard(
           label: m.label,
@@ -290,6 +296,158 @@ class _MetricGrid extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _HighImpactNewsTile extends StatefulWidget {
+  const _HighImpactNewsTile();
+
+  @override
+  State<_HighImpactNewsTile> createState() => _HighImpactNewsTileState();
+}
+
+class _HighImpactNewsTileState extends State<_HighImpactNewsTile> {
+  final _service = EconomicNewsService();
+  final _timeFormat = DateFormat('HH:mm');
+  late final Future<List<EconomicNewsEvent>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _service.fetchCalendar();
+  }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : AppColors.lightCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+      ),
+      child: FutureBuilder<List<EconomicNewsEvent>>(
+        future: _future,
+        builder: (context, snapshot) {
+          final events = _upcomingHighImpact(snapshot.data ?? const []);
+          final next = events.isNotEmpty ? events.first : null;
+          final following = events.length > 1 ? events[1] : null;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.priority_high_rounded,
+                    size: 14,
+                    color: next == null
+                        ? theme.hintColor
+                        : _impactColor(next, theme),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'News',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const Spacer(),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (snapshot.hasError && next == null)
+                Text(
+                  'Unavailable',
+                  style: theme.textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              else if (next == null)
+                Text(
+                  snapshot.connectionState == ConnectionState.waiting
+                      ? 'Loading...'
+                      : 'No upcoming news',
+                  style: theme.textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              else ...[
+                Text(
+                  '${_timeFormat.format(next.dateTime!.toLocal())} ${next.currency}',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: _impactColor(next, theme),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  next.title.trim().isEmpty ? 'Untitled event' : next.title,
+                  style: theme.textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (following != null) ...[
+                  const Spacer(),
+                  Text(
+                    'Next: ${_timeFormat.format(following.dateTime!.toLocal())} ${following.currency}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: _impactColor(following, theme),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  List<EconomicNewsEvent> _upcomingHighImpact(
+    List<EconomicNewsEvent> events,
+  ) {
+    final now = DateTime.now();
+    return events.where((event) {
+      final dateTime = event.dateTime?.toLocal();
+      if (dateTime == null || dateTime.isBefore(now)) return false;
+      final impact = event.impact.toLowerCase();
+      return impact.contains('high') || impact.contains('red');
+    }).toList()
+      ..sort((a, b) => a.dateTime!.toLocal().compareTo(b.dateTime!.toLocal()));
+  }
+
+  Color _impactColor(EconomicNewsEvent event, ThemeData theme) {
+    final impact = event.impact.toLowerCase();
+    if (impact.contains('high') || impact.contains('red')) {
+      return AppColors.loss;
+    }
+    if (impact.contains('medium') || impact.contains('yellow')) {
+      return AppColors.warningYellow;
+    }
+    return theme.colorScheme.onSurface;
   }
 }
 
@@ -510,7 +668,7 @@ class _LineChart extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final gridColor = (isDark ? AppColors.darkDivider : AppColors.lightDivider)
-        .withOpacity(0.15);
+        .withValues(alpha: 0.15);
 
     return LineChart(
       LineChartData(
@@ -692,7 +850,7 @@ class _BarChart extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final gridColor = (isDark ? AppColors.darkDivider : AppColors.lightDivider)
-        .withOpacity(0.15);
+        .withValues(alpha: 0.15);
 
     return BarChart(
       BarChartData(

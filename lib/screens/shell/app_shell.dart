@@ -46,20 +46,22 @@ class AppShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth;
-      if (width >= 1024)
+      if (width >= 1024) {
         return _DesktopLayout(
-            child: child,
             destinations: _destinations,
-            selectedIndex: _selectedIndex(context));
-      if (width >= 600)
+            selectedIndex: _selectedIndex(context),
+            child: child);
+      }
+      if (width >= 600) {
         return _TabletLayout(
-            child: child,
             destinations: _destinations,
-            selectedIndex: _selectedIndex(context));
+            selectedIndex: _selectedIndex(context),
+            child: child);
+      }
       return _MobileLayout(
-          child: child,
           destinations: _destinations,
-          selectedIndex: _selectedIndex(context));
+          selectedIndex: _selectedIndex(context),
+          child: child);
     });
   }
 }
@@ -93,7 +95,10 @@ class _MobileLayout extends StatelessWidget {
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
-        onDestinationSelected: (i) => context.go(destinations[i].route),
+        onDestinationSelected: (i) {
+          if (i == selectedIndex) return;
+          context.go(destinations[i].route);
+        },
         destinations: destinations
             .map((d) => NavigationDestination(
                   icon: Icon(d.icon),
@@ -129,8 +134,10 @@ class _TabletLayout extends StatelessWidget {
                 Expanded(
                   child: NavigationRail(
                     selectedIndex: selectedIndex,
-                    onDestinationSelected: (i) =>
-                        context.go(destinations[i].route),
+                    onDestinationSelected: (i) {
+                      if (i == selectedIndex) return;
+                      context.go(destinations[i].route);
+                    },
                     destinations: destinations
                         .map((d) => NavigationRailDestination(
                               icon: Icon(d.icon),
@@ -236,7 +243,8 @@ class _DesktopLayout extends StatelessWidget {
                                   .withValues(alpha: 0.1),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              onTap: () => context.go(d.route),
+                              onTap:
+                                  selected ? null : () => context.go(d.route),
                             ),
                           );
                         }).toList(),
