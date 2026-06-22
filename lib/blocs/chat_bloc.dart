@@ -1,11 +1,10 @@
-import 'dart:convert';
+import 'dart:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
 import '../services/ai_trading_service.dart';
-import '../services/secure_storage_service.dart';
 
 const _uuid = Uuid();
 
@@ -193,7 +192,6 @@ class ChatErrorState extends ChatState {
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({required AiTradingService aiService, String? profileId})
       : _aiService = aiService,
-        _profileId = profileId,
         super(const ChatInitialState()) {
     on<InitializeChatEvent>(_onInitialize);
     on<NewChatConversationEvent>(_onNewConversation);
@@ -206,7 +204,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   final AiTradingService _aiService;
-  final String? _profileId;
   final List<ChatConversation> _conversations = [];
   String? _activeConversationId;
 
@@ -225,10 +222,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     InitializeChatEvent event,
     Emitter<ChatState> emit,
   ) async {
-    await _loadConversations();
     if (_conversations.isEmpty) {
       _createConversation(title: 'New chat');
-      await _saveConversations();
     }
     _activeConversationId ??= _conversations.first.id;
     emit(_loadedState());
@@ -278,8 +273,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       messages: active.messages.where((m) => m.id != event.messageId).toList(),
       updatedAt: DateTime.now(),
     ));
-    await _saveConversations();
     emit(_loadedState());
+    unawaited(_saveConversations());
   }
 
   Future<void> _onSendMessage(
@@ -297,6 +292,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _appendMessages([userMessage], titleSeed: text);
     await _saveConversations();
     emit(_loadingState());
+    await Future<void>.delayed(const Duration(milliseconds: 80));
 
     try {
       final response = await _aiService.getTradingAdvice(
@@ -330,8 +326,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         timestamp: DateTime.now(),
       )
     ], titleSeed: 'Journal analysis');
-    await _saveConversations();
     emit(_loadingState());
+    unawaited(_saveConversations());
+    await Future<void>.delayed(const Duration(milliseconds: 80));
 
     try {
       final response = await _aiService.analyzeTradeJournal(
@@ -345,8 +342,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           timestamp: DateTime.now(),
         ),
       ]);
-      await _saveConversations();
       emit(_loadedState());
+      unawaited(_saveConversations());
     } catch (e) {
       await _appendError(e);
       emit(_errorState(_formatError(e)));
@@ -365,8 +362,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         timestamp: DateTime.now(),
       )
     ], titleSeed: 'Journal file analysis');
-    await _saveConversations();
     emit(_loadingState());
+    unawaited(_saveConversations());
+    await Future<void>.delayed(const Duration(milliseconds: 80));
 
     try {
       final response =
@@ -378,8 +376,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           timestamp: DateTime.now(),
         ),
       ]);
-      await _saveConversations();
       emit(_loadedState());
+      unawaited(_saveConversations());
     } catch (e) {
       await _appendError(e);
       emit(_errorState(_formatError(e)));
@@ -394,7 +392,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         timestamp: DateTime.now(),
       ),
     ]);
-    await _saveConversations();
+    unawaited(_saveConversations());
   }
 
   void _appendMessages(List<ChatMessage> messages, {String? titleSeed}) {
@@ -430,34 +428,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _conversations.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   }
 
-  Future<void> _loadConversations() async {
-    final stored = await SecureStorageService.instance.read(
-      SecureStorageService.chatConversationsKeyForProfile(_profileId),
-    );
-    _conversations.clear();
-    if (stored == null || stored.trim().isEmpty) return;
-
-    final data = jsonDecode(stored);
-    if (data is! Map<String, dynamic>) return;
-
-    _activeConversationId = data['activeConversationId'] as String?;
-    final conversations = data['conversations'];
-    if (conversations is List) {
-      _conversations.addAll(conversations
-          .whereType<Map<String, dynamic>>()
-          .map(ChatConversation.fromJson));
-      _conversations.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    }
-  }
-
   Future<void> _saveConversations() async {
-    await SecureStorageService.instance.write(
-      SecureStorageService.chatConversationsKeyForProfile(_profileId),
-      jsonEncode({
-        'activeConversationId': _activeConversationId,
-        'conversations': _conversations.map((c) => c.toJson()).toList(),
-      }),
-    );
+    return;
   }
 
   ChatLoadedState _loadedState() => ChatLoadedState(

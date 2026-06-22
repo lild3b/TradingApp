@@ -160,8 +160,12 @@ class _ChatModalState extends State<ChatModal> {
       value: _chatBloc,
       child: Dialog(
         child: SizedBox(
-          width: size.width > 640 ? 560 : size.width * 0.92,
-          height: size.height * 0.82,
+          width: size.width >= 1200
+              ? 980
+              : size.width >= 800
+                  ? size.width * 0.82
+                  : size.width * 0.94,
+          height: size.height * 0.84,
           child: Column(
             children: [
               Container(
@@ -287,6 +291,7 @@ class _ChatModalState extends State<ChatModal> {
                   child: BlocBuilder<ChatBloc, ChatState>(
                     builder: (context, state) {
                       List<ChatMessage> messages = [];
+                      final isLoading = state is ChatLoadingState;
 
                       if (state is ChatLoadedState) {
                         messages = state.messages;
@@ -336,8 +341,14 @@ class _ChatModalState extends State<ChatModal> {
                                 : ListView.builder(
                                     controller: _scrollController,
                                     padding: const EdgeInsets.all(12),
-                                    itemCount: messages.length,
+                                    itemCount:
+                                        messages.length + (isLoading ? 1 : 0),
                                     itemBuilder: (context, index) {
+                                      if (isLoading &&
+                                          index == messages.length) {
+                                        return const _ChatLoadingTile();
+                                      }
+
                                       final message = messages[index];
                                       return _ChatMessageTile(
                                         message: message,
@@ -477,6 +488,44 @@ class _ChatMessageTile extends StatelessWidget {
             onPressed: onDelete,
           ),
       ],
+    );
+  }
+}
+
+class _ChatLoadingTile extends StatelessWidget {
+  const _ChatLoadingTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'AI is reading your journal...',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

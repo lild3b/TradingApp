@@ -6,6 +6,9 @@ import 'package:csv/csv.dart';
 import 'package:uuid/uuid.dart';
 
 const _chatMessageUuid = Uuid();
+const _maxJournalSampleRows = 30;
+const _maxJournalFeedChars = 6500;
+const _maxJournalCellChars = 100;
 
 class ChatMessage {
   final String content;
@@ -396,6 +399,61 @@ Your objective is to help traders become disciplined, data-driven, and consisten
     return text is String ? text : '';
   }
 
+  Future<String?> _getJournalAnalysisAdvice(String prompt) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse(_groqBaseUrl),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': _model,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      'You are a concise trading journal analyst. Use only the provided summary and compact journal feed. Return direct, actionable plain text.',
+                },
+                {'role': 'user', 'content': prompt},
+              ],
+              'max_completion_tokens': 1200,
+              'temperature': 0,
+              'stop': null,
+              'top_p': 1,
+              'stream': false,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final content = _extractAssistantContent(response.body).trim();
+        if (content.isEmpty) {
+          if (kDebugMode) {
+            debugPrint('Groq returned empty journal analysis content: '
+                '${response.body}');
+          }
+          return null;
+        }
+        return content;
+      }
+
+      final errorMessage = _formatApiError(response);
+      if (kDebugMode) {
+        debugPrint(errorMessage);
+      }
+      throw AiTradingServiceException(errorMessage);
+    } on AiTradingServiceException {
+      rethrow;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error calling Groq API: $e');
+      }
+      throw AiTradingServiceException('Unable to reach Groq API: $e');
+    }
+  }
+
   @override
   Future<String> analyzeTradeJournal(
     String journalContent, [
@@ -413,14 +471,20 @@ Your objective is to help traders become disciplined, data-driven, and consisten
     }
 
     final feedUserId = userId?.trim();
-    final computedSummary =
-        _buildDeterministicJournalSummary(trimmedJournalContent);
+    final preparedJournalData = await compute(
+      _prepareJournalAnalysisPayload,
+      trimmedJournalContent,
+    );
+    final computedSummary = preparedJournalData['summary'] ??
+        'Unable to compute deterministic summary from provided data.';
+    final compactJournalFeed = preparedJournalData['feed'] ?? '';
     final analysisPrompt =
         '''You are a trading coach giving a direct, personal performance review. Speak to the trader using "you" and "your" at all times.
 
         RULES YOU MUST FOLLOW:
-        - Use ONLY the data inside JOURNAL DATA. Never invent values, patterns, or examples.
+        - Use ONLY the data inside JOURNAL ANALYSIS FEED. Never invent values, patterns, or examples.
         - The SUMMARY block is authoritative. Use its numbers exactly. Do not recalculate.
+        - The JOURNAL ANALYSIS FEED may be compacted for model safety. Treat aggregate counts as all-trade evidence and sampled rows as examples only.
         - If any metric cannot be traced to a specific row or column in the data, write: "Not available in provided data."
         - Skip any analysis that requires a column not present in the data.
         - Do NOT write a statistics section. The app already shows the SUMMARY separately.
@@ -431,8 +495,8 @@ Your objective is to help traders become disciplined, data-driven, and consisten
         SUMMARY:
         $computedSummary
 
-        JOURNAL DATA:
-        $trimmedJournalContent
+        JOURNAL ANALYSIS FEED:
+        $compactJournalFeed
 
         Write the review in these four sections using bold headers:
 
@@ -440,7 +504,7 @@ Your objective is to help traders become disciplined, data-driven, and consisten
         Describe recurring behaviors, setups, timeframes, or session habits visible in the rows. Name the column and frequency or value range for each. If fewer than 3 rows support a pattern, add: "Early signal — not yet confirmed."
 
         **How You Are Managing Risk**
-        Use only Risk, Reward, R:R Ratio, PnL, and Rules Followed columns. Tell the trader: how consistent their R:R has been, whether following rules improved PnL, what their worst trades had in common, and any risk escalation patterns.
+        Use only Risk Amount, PnL, Position Type, and Rules Followed columns. Tell the trader: whether risk size looks consistent, whether following rules improved PnL, what the worst trades had in common, and any risk escalation patterns.
 
         **Where You Are Strong and Where You Are Leaking**
         Format each item as:
@@ -454,18 +518,55 @@ Your objective is to help traders become disciplined, data-driven, and consisten
 
         Return plain text only. No code blocks. No preamble.''';
 
+    final groqPrompt = '''
+You are a concise trading performance coach.
+Use only the supplied SUMMARY and JOURNAL ANALYSIS FEED.
+Do not invent data. Return final plain text only.
+
+USER ID: ${feedUserId == null || feedUserId.isEmpty ? 'unknown' : feedUserId}
+
+SUMMARY:
+$computedSummary
+
+JOURNAL ANALYSIS FEED:
+$compactJournalFeed
+
+Write exactly these sections:
+
+**Patterns**
+Mention visible patterns in entry strategy, trade comments, PnL, tags, rules followed, market, risk amount, and position type.
+
+**Risk**
+Explain whether risk amount, PnL, rules followed, and position type suggest consistent or risky behavior.
+
+**Strengths and Leaks**
+List what is working and what is costing the trader. Cite the column/value behind each point.
+
+**Next Actions**
+Give 3 specific actions.
+''';
+
     _printJournalAnalysisFeed(
       userId: feedUserId,
       computedSummary: computedSummary,
-      journalContent: trimmedJournalContent,
+      journalContent: compactJournalFeed,
       prompt: analysisPrompt,
     );
 
-    final aiAnalysis = await getTradingAdvice(analysisPrompt);
+    final aiAnalysis = await _getJournalAnalysisAdvice(groqPrompt) ??
+        _buildEmptyGroqJournalFallback();
     return '**Computed Journal Summary**\n'
         '$computedSummary\n\n'
         '**AI Analysis**\n'
         '$aiAnalysis';
+  }
+
+  String _buildEmptyGroqJournalFallback() {
+    return 'Groq accepted the journal request but returned no final message. '
+        'This usually happens with reasoning-heavy models when they spend the '
+        'completion budget internally. The computed summary above is still '
+        'based on your journal data. Try a smaller or non-reasoning Groq model '
+        'for the written coach review.';
   }
 
   @override
@@ -507,7 +608,7 @@ Your objective is to help traders become disciplined, data-driven, and consisten
 
     for (int i = 1; i < rows.length; i++) {
       final row = rows[i];
-      buffer.writeln('Trade ${i}:');
+      buffer.writeln('Trade $i:');
       for (int j = 0; j < headers.length && j < row.length; j++) {
         buffer.writeln('  ${headers[j]}: ${row[j]}');
       }
@@ -522,75 +623,13 @@ Your objective is to help traders become disciplined, data-driven, and consisten
     required String journalContent,
     required String prompt,
   }) {
-    print('--- Journal analysis data feed start ---');
-    print('User ID: ${userId == null || userId.isEmpty ? 'unknown' : userId}');
-    print('--- Computed journal summary start ---');
-    print(computedSummary);
-    print('--- Computed journal summary end ---');
-    print(journalContent);
-    print('--- Journal analysis data feed end ---');
-    print('--- Journal analysis prompt start ---');
-    print(prompt);
-    print('--- Journal analysis prompt end ---');
-  }
+    if (!kDebugMode) return;
 
-  String _buildDeterministicJournalSummary(String journalContent) {
-    try {
-      final rows = const CsvToListConverter().convert(journalContent);
-      if (rows.isEmpty) return 'Total Trades: 0';
-
-      final headers = rows.first.map((h) => h.toString().trim()).toList();
-      final dataRows = rows.skip(1).toList();
-      final pnlIndex = headers.indexOf('PnL');
-
-      var wins = 0;
-      var losses = 0;
-      var breakeven = 0;
-      var grossProfit = 0.0;
-      var grossLoss = 0.0;
-      var netPnl = 0.0;
-
-      for (final row in dataRows) {
-        final pnl = pnlIndex >= 0 && pnlIndex < row.length
-            ? double.tryParse(row[pnlIndex].toString())
-            : null;
-        if (pnl == null) continue;
-
-        netPnl += pnl;
-        if (pnl > 0) {
-          wins++;
-          grossProfit += pnl;
-        } else if (pnl < 0) {
-          losses++;
-          grossLoss += pnl.abs();
-        } else {
-          breakeven++;
-        }
-      }
-
-      final totalTrades = dataRows.length;
-      final winRate = totalTrades > 0 ? wins / totalTrades * 100 : 0.0;
-      final averageWin = wins > 0 ? grossProfit / wins : 0.0;
-      final averageLoss = losses > 0 ? grossLoss / losses : 0.0;
-      final profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0.0;
-      final expectancy = totalTrades > 0 ? netPnl / totalTrades : 0.0;
-
-      return [
-        'Total Trades: $totalTrades',
-        'Columns: ${headers.join(', ')}',
-        'Wins: $wins',
-        'Losses: $losses',
-        'Breakeven Trades: $breakeven',
-        'Win Rate: ${winRate.toStringAsFixed(2)}%',
-        'Average Profit: ${averageWin.toStringAsFixed(2)}',
-        'Average Loss: ${averageLoss.toStringAsFixed(2)}',
-        'Net PnL: ${netPnl.toStringAsFixed(2)}',
-        'Profit Factor: ${profitFactor.toStringAsFixed(2)}',
-        'Expectancy: ${expectancy.toStringAsFixed(2)}',
-      ].join('\n');
-    } catch (e) {
-      return 'Unable to compute deterministic summary from provided data: $e';
-    }
+    debugPrint('Journal analysis request prepared. '
+        'userId=${userId == null || userId.isEmpty ? 'unknown' : userId}, '
+        'summaryChars=${computedSummary.length}, '
+        'feedChars=${journalContent.length}, '
+        'promptChars=${prompt.length}');
   }
 
   String _getFallbackResponse(String query) {
@@ -679,4 +718,279 @@ Your objective is to help traders become disciplined, data-driven, and consisten
   Future<void> dispose() async {
     _conversationHistory.clear();
   }
+}
+
+class _JournalGroupStats {
+  var count = 0;
+  var wins = 0;
+  var losses = 0;
+  var netPnl = 0.0;
+
+  void add(double pnl) {
+    count++;
+    netPnl += pnl;
+    if (pnl > 0) {
+      wins++;
+    } else if (pnl < 0) {
+      losses++;
+    }
+  }
+
+  String get summary {
+    final averagePnl = count == 0 ? 0.0 : netPnl / count;
+    return 'count $count, wins $wins, losses $losses, '
+        'net PnL ${netPnl.toStringAsFixed(2)}, '
+        'avg PnL ${averagePnl.toStringAsFixed(2)}';
+  }
+}
+
+Map<String, String> _prepareJournalAnalysisPayload(String journalContent) {
+  return {
+    'summary': _buildDeterministicJournalSummaryInBackground(journalContent),
+    'feed': _buildCompactJournalFeedInBackground(journalContent),
+  };
+}
+
+String _buildDeterministicJournalSummaryInBackground(String journalContent) {
+  try {
+    final rows = const CsvToListConverter().convert(journalContent);
+    if (rows.isEmpty) return 'Total Trades: 0';
+
+    final headers = rows.first.map((h) => h.toString().trim()).toList();
+    final dataRows = rows.skip(1).toList();
+    final pnlIndex = headers.indexOf('PnL');
+
+    var wins = 0;
+    var losses = 0;
+    var breakeven = 0;
+    var grossProfit = 0.0;
+    var grossLoss = 0.0;
+    var netPnl = 0.0;
+
+    for (final row in dataRows) {
+      final pnl = pnlIndex >= 0 && pnlIndex < row.length
+          ? double.tryParse(row[pnlIndex].toString())
+          : null;
+      if (pnl == null) continue;
+
+      netPnl += pnl;
+      if (pnl > 0) {
+        wins++;
+        grossProfit += pnl;
+      } else if (pnl < 0) {
+        losses++;
+        grossLoss += pnl.abs();
+      } else {
+        breakeven++;
+      }
+    }
+
+    final totalTrades = dataRows.length;
+    final winRate = totalTrades > 0 ? wins / totalTrades * 100 : 0.0;
+    final averageWin = wins > 0 ? grossProfit / wins : 0.0;
+    final averageLoss = losses > 0 ? grossLoss / losses : 0.0;
+    final profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0.0;
+    final expectancy = totalTrades > 0 ? netPnl / totalTrades : 0.0;
+
+    return [
+      'Total Trades: $totalTrades',
+      'Columns: ${headers.join(', ')}',
+      'Wins: $wins',
+      'Losses: $losses',
+      'Breakeven Trades: $breakeven',
+      'Win Rate: ${winRate.toStringAsFixed(2)}%',
+      'Average Profit: ${averageWin.toStringAsFixed(2)}',
+      'Average Loss: ${averageLoss.toStringAsFixed(2)}',
+      'Net PnL: ${netPnl.toStringAsFixed(2)}',
+      'Profit Factor: ${profitFactor.toStringAsFixed(2)}',
+      'Expectancy: ${expectancy.toStringAsFixed(2)}',
+    ].join('\n');
+  } catch (e) {
+    return 'Unable to compute deterministic summary from provided data: $e';
+  }
+}
+
+String _buildCompactJournalFeedInBackground(String journalContent) {
+  try {
+    final rows = const CsvToListConverter().convert(journalContent);
+    if (rows.length <= 1) return journalContent;
+
+    final headers = rows.first.map((h) => h.toString().trim()).toList();
+    final dataRows = rows.skip(1).toList();
+    final counts = _buildJournalPatternCountsInBackground(headers, dataRows);
+    final groupSummaries =
+        _buildJournalGroupSummariesInBackground(headers, dataRows);
+    final sampleCsv = _buildJournalSampleCsvInBackground(headers, dataRows);
+
+    final feed = [
+      'All-trade row count: ${dataRows.length}',
+      if (counts.isNotEmpty) 'Aggregate pattern counts:\n$counts',
+      if (groupSummaries.isNotEmpty)
+        'Grouped performance summaries:\n$groupSummaries',
+      'Relevant representative rows:',
+      sampleCsv,
+      if (dataRows.length > _maxJournalSampleRows)
+        'Note: Sample is capped at $_maxJournalSampleRows rows and prioritizes recent, largest winning, and largest losing trades.',
+    ].join('\n\n');
+
+    return _clipTextInBackground(feed, _maxJournalFeedChars);
+  } catch (_) {
+    return _clipTextInBackground(journalContent, _maxJournalFeedChars);
+  }
+}
+
+String _buildJournalPatternCountsInBackground(
+  List<String> headers,
+  List<List<dynamic>> dataRows,
+) {
+  final targetColumns = [
+    'Market',
+    'Position Type',
+    'Entry Strategy',
+    'Tags',
+    'Rules Followed',
+  ];
+  final lines = <String>[];
+
+  for (final column in targetColumns) {
+    final index = headers.indexOf(column);
+    if (index < 0) continue;
+
+    final counts = <String, int>{};
+    for (final row in dataRows) {
+      if (index >= row.length) continue;
+      final rawValue = row[index].toString().trim();
+      if (rawValue.isEmpty) continue;
+
+      final values = column == 'Tags'
+          ? rawValue.split(',').map((v) => v.trim()).where((v) => v.isNotEmpty)
+          : <String>[rawValue];
+      for (final value in values) {
+        counts[value] = (counts[value] ?? 0) + 1;
+      }
+    }
+
+    if (counts.isEmpty) continue;
+    final topCounts = counts.entries.toList()
+      ..sort((a, b) {
+        final countCompare = b.value.compareTo(a.value);
+        return countCompare != 0 ? countCompare : a.key.compareTo(b.key);
+      });
+    final formatted = topCounts
+        .take(8)
+        .map((entry) => '${entry.key}: ${entry.value}')
+        .join(', ');
+    lines.add('$column - $formatted');
+  }
+
+  return lines.join('\n');
+}
+
+String _buildJournalGroupSummariesInBackground(
+  List<String> headers,
+  List<List<dynamic>> dataRows,
+) {
+  final pnlIndex = headers.indexOf('PnL');
+  if (pnlIndex < 0) return '';
+
+  final lines = <String>[];
+  for (final column in ['Market', 'Entry Strategy', 'Rules Followed']) {
+    final index = headers.indexOf(column);
+    if (index < 0) continue;
+
+    final groups = <String, _JournalGroupStats>{};
+    for (final row in dataRows) {
+      if (index >= row.length) continue;
+      final value = row[index].toString().trim();
+      if (value.isEmpty) continue;
+
+      final pnl = _numericCellInBackground(row, pnlIndex);
+      if (pnl == null) continue;
+      groups.putIfAbsent(value, _JournalGroupStats.new).add(pnl);
+    }
+
+    if (groups.isEmpty) continue;
+    final topGroups = groups.entries.toList()
+      ..sort((a, b) => b.value.count.compareTo(a.value.count));
+    final formatted = topGroups
+        .take(6)
+        .map((entry) => '${entry.key}: ${entry.value.summary}')
+        .join('; ');
+    lines.add('$column - $formatted');
+  }
+
+  return lines.join('\n');
+}
+
+String _buildJournalSampleCsvInBackground(
+  List<String> headers,
+  List<List<dynamic>> dataRows,
+) {
+  final selectedIndexes = <int>{};
+  final pnlIndex = headers.indexOf('PnL');
+
+  void addIndexes(Iterable<int> indexes) {
+    for (final index in indexes) {
+      if (index >= 0 && index < dataRows.length) selectedIndexes.add(index);
+      if (selectedIndexes.length >= _maxJournalSampleRows) return;
+    }
+  }
+
+  final mostRecentStart = dataRows.length > 16 ? dataRows.length - 16 : 0;
+  addIndexes(List<int>.generate(
+    dataRows.length - mostRecentStart,
+    (i) => mostRecentStart + i,
+  ).reversed);
+
+  if (pnlIndex >= 0) {
+    final pnlRows = List<int>.generate(dataRows.length, (i) => i)
+      ..sort((a, b) {
+        final aPnl = _numericCellInBackground(dataRows[a], pnlIndex) ?? 0;
+        final bPnl = _numericCellInBackground(dataRows[b], pnlIndex) ?? 0;
+        return aPnl.compareTo(bPnl);
+      });
+    addIndexes(pnlRows.take(7));
+    addIndexes(pnlRows.reversed.take(7));
+  }
+
+  addIndexes(List<int>.generate(dataRows.length, (i) => i));
+
+  final includedColumns = [
+    'Entry Strategy',
+    'Trade Comments',
+    'PnL',
+    'Tags',
+    'Rules Followed',
+    'Market',
+    'Risk Amount',
+    'Position Type',
+  ];
+  final includedIndexes = includedColumns
+      .map(headers.indexOf)
+      .where((index) => index >= 0)
+      .toList();
+
+  final sampledRows = <List<dynamic>>[
+    includedIndexes.map((index) => headers[index]).toList(),
+  ];
+
+  for (final index in selectedIndexes.take(_maxJournalSampleRows)) {
+    final row = dataRows[index];
+    sampledRows.add(includedIndexes.map((columnIndex) {
+      final value = columnIndex < row.length ? row[columnIndex] : '';
+      return _clipTextInBackground(value.toString(), _maxJournalCellChars);
+    }).toList());
+  }
+
+  return const ListToCsvConverter().convert(sampledRows);
+}
+
+double? _numericCellInBackground(List<dynamic> row, int index) {
+  if (index < 0 || index >= row.length) return null;
+  return double.tryParse(row[index].toString());
+}
+
+String _clipTextInBackground(String value, int maxChars) {
+  if (value.length <= maxChars) return value;
+  return '${value.substring(0, maxChars)}\n[Truncated to $maxChars characters for model safety.]';
 }

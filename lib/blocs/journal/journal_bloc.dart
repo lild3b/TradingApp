@@ -179,14 +179,20 @@ class JournalBloc extends Bloc<JournalEvent, JournalState> {
           !t.market.toLowerCase().contains(event.market!.toLowerCase())) {
         return false;
       }
-      if (event.positionType != null && t.positionType != event.positionType)
+      if (event.positionType != null && t.positionType != event.positionType) {
         return false;
-      if (event.rulesFollowed != null && t.rulesFollowed != event.rulesFollowed)
+      }
+      if (event.rulesFollowed != null &&
+          t.rulesFollowed != event.rulesFollowed) {
         return false;
-      if (event.startDate != null && t.dateTimeTaken.isBefore(event.startDate!))
+      }
+      if (event.startDate != null &&
+          t.dateTimeTaken.isBefore(event.startDate!)) {
         return false;
-      if (event.endDate != null && t.dateTimeTaken.isAfter(event.endDate!))
+      }
+      if (event.endDate != null && t.dateTimeTaken.isAfter(event.endDate!)) {
         return false;
+      }
       if (event.tags != null && event.tags!.isNotEmpty) {
         if (!event.tags!.any((tag) => t.tags.contains(tag))) return false;
       }
@@ -297,9 +303,9 @@ class JournalBloc extends Bloc<JournalEvent, JournalState> {
         throw Exception('Add trades before analyzing your journal.');
       }
 
-      final csvContent = _exportRepo.buildTradesCsv(trades);
+      final analysisDataFeed = _buildAnalysisDataFeed(trades);
       emit(JournalAnalyzed(
-        journalContent: csvContent,
+        journalContent: analysisDataFeed,
         userId: event.userId,
       ));
       if (previousState != null) {
@@ -310,6 +316,50 @@ class JournalBloc extends Bloc<JournalEvent, JournalState> {
       if (previousState != null) {
         emit(previousState);
       }
+    }
+  }
+
+  String _buildAnalysisDataFeed(List<Trade> trades) {
+    final buffer = StringBuffer()
+      ..writeln(
+        'Entry Strategy,Trade Comments,PnL,Tags,Rules Followed,Market,Risk Amount,Position Type',
+      );
+
+    for (final trade in trades) {
+      buffer.writeln([
+        _csvCell(_clipAnalysisText(trade.entryStrategy, 120)),
+        _csvCell(_clipAnalysisText(trade.comments, 180)),
+        trade.pnl.toStringAsFixed(2),
+        _csvCell(trade.tags.take(6).join('|')),
+        _rulesFollowedLabel(trade.rulesFollowed),
+        _csvCell(trade.market),
+        trade.riskAmount.toStringAsFixed(2),
+        trade.positionType == PositionType.long ? 'Long' : 'Short',
+      ].join(','));
+    }
+
+    return buffer.toString();
+  }
+
+  String _csvCell(String value) {
+    final escaped = value.replaceAll('"', '""');
+    return '"$escaped"';
+  }
+
+  String _clipAnalysisText(String value, int maxChars) {
+    final compact = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (compact.length <= maxChars) return compact;
+    return compact.substring(0, maxChars);
+  }
+
+  String _rulesFollowedLabel(RulesFollowed rulesFollowed) {
+    switch (rulesFollowed) {
+      case RulesFollowed.yes:
+        return 'Yes';
+      case RulesFollowed.partial:
+        return 'Partial';
+      case RulesFollowed.no:
+        return 'No';
     }
   }
 }
